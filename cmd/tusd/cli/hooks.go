@@ -20,19 +20,39 @@ func hookTypeInSlice(a hooks.HookType, list []hooks.HookType) bool {
 	return false
 }
 
-func preCreateCallback(info handler.HookEvent) error {
-	if output, err := invokeHookSync(hooks.HookPreCreate, info, true); err != nil {
-		if hookErr, ok := err.(hooks.HookError); ok {
-			return hooks.NewHookError(
-				fmt.Errorf("pre-create hook failed: %s", err),
-				hookErr.StatusCode(),
-				hookErr.Body(),
-			)
+func hookCallback(typ hooks.HookType, info handler.HookEvent) error {
+	if hookTypeInSlice(typ, Flags.SyncHooks) {
+		if output, err := invokeHookSync(typ, info, true); err != nil {
+			if hookErr, ok := err.(hooks.HookError); ok {
+				return hooks.NewHookError(
+					fmt.Errorf("%s hook failed: %s", typ, err),
+					hookErr.StatusCode(),
+					hookErr.Body(),
+				)
+			}
+			return fmt.Errorf("%s hook failed: %s\n%s", typ, err, string(output))
 		}
-		return fmt.Errorf("pre-create hook failed: %s\n%s", err, string(output))
+	} else {
+		invokeHookAsync(typ, info)
 	}
 
 	return nil
+}
+
+func postFinishCallback(info handler.HookEvent) error {
+	return hookCallback(hooks.HookPostFinish, info)
+}
+func postTerminateCallback(info handler.HookEvent) error {
+	return hookCallback(hooks.HookPostTerminate, info)
+}
+func postReceiveCallback(info handler.HookEvent) error {
+	return hookCallback(hooks.HookPostReceive, info)
+}
+func postCreateCallback(info handler.HookEvent) error {
+	return hookCallback(hooks.HookPostCreate, info)
+}
+func preCreateCallback(info handler.HookEvent) error {
+	return hookCallback(hooks.HookPreCreate, info)
 }
 
 func SetupHookMetrics() {
@@ -87,26 +107,13 @@ func SetupPreHooks(config *handler.Config) error {
 		return err
 	}
 
-	config.PreUploadCreateCallback = preCreateCallback
+	config.PostFinishCallback = postFinishCallback
+	config.PostTerminateCallback = postTerminateCallback
+	config.PostReceiveCallback = postReceiveCallback
+	config.PostCreateCallback = postCreateCallback
+	config.PreCreateCallback = preCreateCallback
 
 	return nil
-}
-
-func SetupPostHooks(handler *handler.Handler) {
-	go func() {
-		for {
-			select {
-			case info := <-handler.CompleteUploads:
-				invokeHookAsync(hooks.HookPostFinish, info)
-			case info := <-handler.TerminatedUploads:
-				invokeHookAsync(hooks.HookPostTerminate, info)
-			case info := <-handler.UploadProgress:
-				invokeHookAsync(hooks.HookPostReceive, info)
-			case info := <-handler.CreatedUploads:
-				invokeHookAsync(hooks.HookPostCreate, info)
-			}
-		}
-	}()
 }
 
 func invokeHookAsync(typ hooks.HookType, info handler.HookEvent) {
