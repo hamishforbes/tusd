@@ -1202,15 +1202,9 @@ func i64toa(num int64) string {
 // getRequestId returns the value of the X-Request-ID header, if available,
 // and also takes care of truncating the input.
 func getRequestId(r *http.Request) string {
-	reqId := r.Header.Get("X-Request-ID")
+	reqId := r.Header.Get("X-Blink-RequestID")
 	if reqId == "" {
 		return ""
-	}
-
-	// Limit the length of the request ID to 36 characters, which is enough
-	// to fit a UUID.
-	if len(reqId) > 36 {
-		reqId = reqId[:36]
 	}
 
 	return reqId
