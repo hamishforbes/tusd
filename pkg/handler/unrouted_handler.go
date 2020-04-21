@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"io"
+	"io/ioutil"
 	"log"
 	"math"
 	"net"
@@ -368,7 +369,7 @@ func (handler *UnroutedHandler) PostFile(w http.ResponseWriter, r *http.Request)
 	w.Header().Set("Location", url)
 
 	handler.Metrics.incUploadsCreated()
-	handler.log("UploadCreated", "id", id, "size", i64toa(size), "url", url)
+	handler.log("UploadCreated", "id", id, "size", i64toa(size), "url", url, "requestId", getRequestId(r))
 
 	if handler.config.NotifyCreatedUploads {
 		handler.CreatedUploads <- newHookEvent(info, r)
@@ -606,7 +607,7 @@ func (handler *UnroutedHandler) writeChunk(ctx context.Context, upload Upload, i
 		maxSize = length
 	}
 
-	handler.log("ChunkWriteStart", "id", id, "maxSize", i64toa(maxSize), "offset", i64toa(offset))
+	handler.log("ChunkWriteStart", "id", id, "maxSize", i64toa(maxSize), "offset", i64toa(offset), "requestId", getRequestId(r))
 
 	var bytesWritten int64
 	// Prevent a nil pointer dereference when accessing the body which may not be
@@ -644,7 +645,7 @@ func (handler *UnroutedHandler) writeChunk(ctx context.Context, upload Upload, i
 			if terminateErr := handler.terminateUpload(ctx, upload, info, r); terminateErr != nil {
 				// We only log this error and not show it to the user since this
 				// termination error is not relevant to the uploading client
-				handler.log("UploadStopTerminateError", "id", id, "error", terminateErr.Error())
+				handler.log("UploadStopTerminateError", "id", id, "error", terminateErr.Error(), "requestId", getRequestId(r))
 			}
 		}
 
@@ -660,7 +661,7 @@ func (handler *UnroutedHandler) writeChunk(ctx context.Context, upload Upload, i
 		}
 	}
 
-	handler.log("ChunkWriteComplete", "id", id, "bytesWritten", i64toa(bytesWritten))
+	handler.log("ChunkWriteComplete", "id", id, "bytesWritten", i64toa(bytesWritten), "requestId", getRequestId(r))
 
 	// Send new offset to client
 	newOffset := offset + bytesWritten
@@ -916,6 +917,9 @@ func (handler *UnroutedHandler) sendError(w http.ResponseWriter, r *http.Request
 	}
 
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	// Read and discard the rest of the body
+	_, _ = io.Copy(ioutil.Discard, r.Body)
+	// Return the error
 	http.Error(w, string(statusErr.Body()), statusErr.StatusCode())
 
 	handler.log("ResponseOutgoing", "status", strconv.Itoa(statusErr.StatusCode()), "method", r.Method, "path", r.URL.Path, "error", err.Error(), "requestId", getRequestId(r))
