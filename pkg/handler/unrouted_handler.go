@@ -896,6 +896,28 @@ func (handler *UnroutedHandler) sendError(w http.ResponseWriter, r *http.Request
 		err = ErrNotFound
 	}
 
+	statusErr, ok := err.(HTTPError)
+	if !ok {
+		statusErr = NewHTTPError(err, http.StatusInternalServerError)
+	}
+
+	reason := append(statusErr.Body(), '\n')
+	if r.Method == "HEAD" {
+		reason = nil
+	}
+
+	if r.Body != nil {
+		// Read and discard the rest of the body
+		_, _ = io.Copy(ioutil.Discard, r.Body)
+	}
+
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.Header().Set("Content-Length", strconv.Itoa(len(reason)))
+	w.WriteHeader(statusErr.StatusCode())
+	_, _ = w.Write(reason)
+
+	handler.log("ResponseOutgoing", "status", strconv.Itoa(statusErr.StatusCode()), "method", r.Method, "path", r.URL.Path, "error", err.Error(), "requestId", getRequestId(r))
+
 	// Errors for read timeouts contain too much information which is not
 	// necessary for us and makes grouping for the metrics harder. The error
 	// message looks like: read tcp 127.0.0.1:1080->127.0.0.1:53673: i/o timeout
@@ -910,19 +932,6 @@ func (handler *UnroutedHandler) sendError(w http.ResponseWriter, r *http.Request
 	if strings.HasSuffix(err.Error(), "read: connection reset by peer") {
 		err = errors.New("read tcp: connection reset by peer")
 	}
-
-	statusErr, ok := err.(HTTPError)
-	if !ok {
-		statusErr = NewHTTPError(err, http.StatusInternalServerError)
-	}
-
-	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	// Read and discard the rest of the body
-	_, _ = io.Copy(ioutil.Discard, r.Body)
-	// Return the error
-	http.Error(w, string(statusErr.Body()), statusErr.StatusCode())
-
-	handler.log("ResponseOutgoing", "status", strconv.Itoa(statusErr.StatusCode()), "method", r.Method, "path", r.URL.Path, "error", err.Error(), "requestId", getRequestId(r))
 
 	handler.Metrics.incErrorsTotal(statusErr)
 }
